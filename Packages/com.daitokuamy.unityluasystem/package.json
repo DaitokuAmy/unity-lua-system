@@ -1,0 +1,14 @@
+{
+    "name": "com.daitokuamy.unityluasystem",
+    "displayName": "Unity Lua System",
+    "version": "0.8.0",
+    "unity": "6000.3",
+    "license" : "MIT",
+    "dependencies": {
+    },
+    "author": {
+        "name": "Hironori Ito",
+        "url": "https://github.com/DaitokuAmy"
+    },
+    "description": "UnityでLuaを動かすためのライブラリです"
+}

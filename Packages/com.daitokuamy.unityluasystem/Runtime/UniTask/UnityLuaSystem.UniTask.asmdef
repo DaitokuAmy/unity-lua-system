@@ -1,0 +1,19 @@
+{
+    "name": "UnityLuaSystem.UniTask",
+    "rootNamespace": "UnityLuaSystem.UniTask",
+    "references": [
+        "UnityLuaSystem.Runtime",
+        "UniTask"
+    ],
+    "defineConstraints": [
+        "UNITY_LUA_SYSTEM_UNITASK"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.cysharp.unitask",
+            "expression": "2.0.0",
+            "define": "UNITY_LUA_SYSTEM_UNITASK"
+        }
+    ],
+    "noEngineReferences": true
+}

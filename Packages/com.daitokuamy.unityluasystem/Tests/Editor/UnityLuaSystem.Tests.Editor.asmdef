@@ -1,0 +1,13 @@
+{
+    "name": "UnityLuaSystem.Tests.Editor",
+    "rootNamespace": "UnityLuaSystem.Tests",
+    "references": [
+        "UnityLuaSystem.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

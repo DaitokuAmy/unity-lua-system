@@ -1,0 +1,25 @@
+{
+    "name": "UnityLuaSystem.UniTask.Tests.Editor",
+    "rootNamespace": "UnityLuaSystem.UniTask.Tests",
+    "references": [
+        "UnityLuaSystem.Runtime",
+        "UnityLuaSystem.UniTask",
+        "UniTask"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "defineConstraints": [
+        "UNITY_LUA_SYSTEM_UNITASK"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.cysharp.unitask",
+            "expression": "2.0.0",
+            "define": "UNITY_LUA_SYSTEM_UNITASK"
+        }
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

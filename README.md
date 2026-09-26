@@ -40,6 +40,14 @@ UnityのPackage Managerで「Install package from git URL」を選び、次を�
 https://github.com/DaitokuAmy/unity-lua-system.git?path=Packages/com.daitokuamy.unityluasystem
 ```
 
+特定のリリースを利用する場合は、末尾にタグを指定します。次の例では `0.8.0` タグを指定しています。
+
+```text
+https://github.com/DaitokuAmy/unity-lua-system.git?path=Packages/com.daitokuamy.unityluasystem#0.8.0
+```
+
+`0.8.0` は、利用したいリリースタグへ置き換えてください。
+
 リポジトリが非公開の場合は、UnityがGitHubへアクセスできる認証設定が必要です。
 
 ### ローカルPackageとして導入する場合

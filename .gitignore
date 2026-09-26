@@ -65,6 +65,9 @@ crashlytics-build.properties
 **/[Bb]in/
 **/[Oo]bj/
 
+# Unity Android native build cache
+/.utmp/
+
 # Test outputs
 TestResults.xml
 

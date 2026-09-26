@@ -25,7 +25,7 @@ PluginImporter:
         DefaultValueInitialized: true
         OS: Windows
   - first:
-      Standalone: Windows64
+      Standalone: Win64
     second:
       enabled: 1
       settings:

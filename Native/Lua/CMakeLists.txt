@@ -27,6 +27,11 @@ endif()
 add_library(lua54 ${LUA_LIBRARY_TYPE} ${LUA_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/unity_lua_bridge.c")
 
 target_include_directories(lua54 PUBLIC "${LUA_SOURCE_DIRECTORY}")
+if(IOS)
+    target_compile_definitions(lua54 PRIVATE LUA_USE_IOS)
+elseif(APPLE)
+    target_compile_definitions(lua54 PRIVATE LUA_USE_MACOSX)
+endif()
 set_target_properties(lua54 PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED ON

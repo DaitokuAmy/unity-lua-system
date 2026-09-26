@@ -29,7 +29,11 @@ UnityLuaSystem.UniTask
 
 UnityLuaSystem.SourceGenerator
 ├── Binding Generator
+├── Lua API Metadata Generator
 └── Binding Validator
+
+UnityLuaSystem.Editor
+└── LuaCATS Definition Exporter
 
 UnityLuaSystem.Tests
 ├── Runtime Tests
@@ -324,6 +328,17 @@ staticバインディングをRuntimeの寿命と常に一致させる場合、�
 Source Generatorが作成したモジュール単位のバインディングを `LuaRuntime` から使用するための契約。
 
 通常の利用者が手動で実装することは想定しない。
+
+### ILuaGeneratedApiMetadata
+
+| 項目 | 内容 |
+| --- | --- |
+| 種別 | `interface` |
+| 状態 | 採用 |
+
+Source Generatorがコンパイル時に収集したLua APIとXMLドキュメントコメントをEditorへ公開する契約。
+
+生成実装は `UNITY_EDITOR` の場合だけコンパイルし、Playerビルドへドキュメント文字列を含めない。Editor側の `LuaDefinitionExporter` は全アセンブリの実装を収集し、LuaCATS定義ファイルへ統合する。
 
 ## C#オブジェクトの受け渡し
 

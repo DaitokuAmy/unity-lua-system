@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace UnityLuaSystem.SourceGenerator {
     /// <summary>
-    /// Luaモジュールの型付き呼び出しコードを生成するSource Generator
+    /// Luaモジュールの型付き呼び出しコードとLua APIメタデータを生成するSource Generator
     /// </summary>
     [Generator]
     public sealed class LuaBindingSourceGenerator : ISourceGenerator {
@@ -16,53 +17,65 @@ namespace UnityLuaSystem.SourceGenerator {
         private const string ModuleAttributeName = "UnityLuaSystem.LuaModuleAttribute";
         private const string ObjectAttributeName = "UnityLuaSystem.LuaObjectAttribute";
 
+        private static readonly HashSet<string> LuaKeywords = new HashSet<string>(StringComparer.Ordinal) {
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+        };
+
         /// <inheritdoc/>
         public void Initialize(GeneratorInitializationContext context) {
-            context.RegisterForSyntaxNotifications(() => new ModuleSyntaxReceiver());
+            context.RegisterForSyntaxNotifications(() => new AttributedTypeSyntaxReceiver());
         }
 
         /// <inheritdoc/>
         public void Execute(GeneratorExecutionContext context) {
-            if (!(context.SyntaxReceiver is ModuleSyntaxReceiver receiver)) {
+            if (!(context.SyntaxReceiver is AttributedTypeSyntaxReceiver receiver)) {
                 return;
             }
 
-            var processedTypes = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-            foreach (var declaration in receiver.Candidates) {
-                var semanticModel = context.Compilation.GetSemanticModel(declaration.SyntaxTree);
-                if (!(semanticModel.GetDeclaredSymbol(declaration) is INamedTypeSymbol moduleType)) {
-                    continue;
-                }
-                if (!processedTypes.Add(moduleType) || GetAttribute(moduleType, ModuleAttributeName) == null) {
-                    continue;
-                }
+            var types = CollectTypes(context, receiver);
+            foreach (var moduleType in types.Where(type => GetAttribute(type, ModuleAttributeName) != null)) {
                 if (moduleType.ContainingType != null || moduleType.IsGenericType) {
                     continue;
                 }
 
                 var source = GenerateBinding(moduleType);
-                if (source != null) {
-                    var hintName = moduleType.ToDisplayString().Replace('.', '_').Replace('+', '_');
-                    context.AddSource($"{hintName}.UnityLuaSystem.Binding.g.cs", SourceText.From(source, Encoding.UTF8));
+                if (source == null) {
+                    continue;
+                }
+
+                var hintName = moduleType.ToDisplayString().Replace('.', '_').Replace('+', '_');
+                context.AddSource($"{hintName}.UnityLuaSystem.Binding.g.cs", SourceText.From(source, Encoding.UTF8));
+            }
+
+            var definition = GenerateApiDefinition(types);
+            if (!string.IsNullOrEmpty(definition)) {
+                context.AddSource("UnityLuaSystem.ApiMetadata.g.cs", SourceText.From(GenerateMetadataProvider(definition), Encoding.UTF8));
+            }
+        }
+
+        private static INamedTypeSymbol[] CollectTypes(GeneratorExecutionContext context, AttributedTypeSyntaxReceiver receiver) {
+            var types = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+            foreach (var declaration in receiver.Candidates) {
+                var semanticModel = context.Compilation.GetSemanticModel(declaration.SyntaxTree);
+                if (!(semanticModel.GetDeclaredSymbol(declaration) is INamedTypeSymbol type)) {
+                    continue;
+                }
+                if (GetAttribute(type, ModuleAttributeName) != null || GetAttribute(type, ObjectAttributeName) != null) {
+                    types.Add(type);
                 }
             }
+            return types.OrderBy(type => type.ToDisplayString(), StringComparer.Ordinal).ToArray();
         }
 
         /// <summary>
         /// モジュール型の生成済みバインディングコードを構築
         /// </summary>
-        /// <param name="moduleType">生成対象のモジュール型</param>
-        /// <returns>生成するC#コード、またはnull</returns>
         private static string GenerateBinding(INamedTypeSymbol moduleType) {
-            var attributedMethods = moduleType.GetMembers()
-                .OfType<IMethodSymbol>()
-                .Where(method => method.MethodKind == MethodKind.Ordinary && GetAttribute(method, FunctionAttributeName) != null)
-                .ToArray();
+            var attributedMethods = GetLuaMethods(moduleType).ToArray();
             var duplicatedNames = new HashSet<string>(
                 attributedMethods.GroupBy(method => method.Name).Where(group => group.Count() > 1).Select(group => group.Key),
                 StringComparer.Ordinal);
             var methods = attributedMethods
-                .Where(method => method.DeclaredAccessibility == Accessibility.Public)
                 .Where(method => !method.IsGenericMethod)
                 .Where(method => !duplicatedNames.Contains(method.Name))
                 .Where(IsSupportedMethod)
@@ -71,9 +84,7 @@ namespace UnityLuaSystem.SourceGenerator {
                 return null;
             }
 
-            var namespaceName = moduleType.ContainingNamespace.IsGlobalNamespace
-                ? null
-                : moduleType.ContainingNamespace.ToDisplayString();
+            var namespaceName = moduleType.ContainingNamespace.IsGlobalNamespace ? null : moduleType.ContainingNamespace.ToDisplayString();
             var moduleTypeName = moduleType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             var bindingTypeName = $"__UnityLuaSystem_{moduleType.Name}Binding";
             var builder = new StringBuilder();
@@ -107,15 +118,12 @@ namespace UnityLuaSystem.SourceGenerator {
             return builder.ToString();
         }
 
-        /// <summary>
-        /// 生成済み関数を検索する処理を構築
-        /// </summary>
         private static void AppendLookupMethod(StringBuilder builder, IEnumerable<IMethodSymbol> methods) {
             builder.AppendLine("        public bool TryGetFunction(string methodName, out string functionName, out global::UnityLuaSystem.LuaGeneratedFunctionCallback callback) {");
             builder.AppendLine("            switch (methodName) {");
             foreach (var method in methods) {
-                builder.Append("                case \"").Append(Escape(method.Name)).AppendLine("\":");
-                builder.Append("                    functionName = \"").Append(Escape(GetLuaFunctionName(method))).AppendLine("\";");
+                builder.Append("                case \"").Append(EscapeCSharp(method.Name)).AppendLine("\":");
+                builder.Append("                    functionName = \"").Append(EscapeCSharp(GetLuaFunctionName(method))).AppendLine("\";");
                 builder.Append("                    callback = Invoke_").Append(method.Name).AppendLine(";");
                 builder.AppendLine("                    return true;");
             }
@@ -127,9 +135,6 @@ namespace UnityLuaSystem.SourceGenerator {
             builder.AppendLine("        }");
         }
 
-        /// <summary>
-        /// C#メソッドを直接呼び出す処理を構築
-        /// </summary>
         private static void AppendCallback(StringBuilder builder, IMethodSymbol method, string moduleTypeName) {
             builder.AppendLine();
             builder.Append("        private int Invoke_").Append(method.Name)
@@ -161,9 +166,97 @@ namespace UnityLuaSystem.SourceGenerator {
             builder.AppendLine("        }");
         }
 
-        /// <summary>
-        /// Source Generatorで直接呼び出せるメソッドかどうかを確認
-        /// </summary>
+        private static string GenerateApiDefinition(IEnumerable<INamedTypeSymbol> types) {
+            var builder = new StringBuilder();
+            foreach (var type in types.Where(type => GetAttribute(type, ObjectAttributeName) != null).OrderBy(GetLuaTypeName, StringComparer.Ordinal)) {
+                AppendObjectDefinition(builder, type);
+            }
+            foreach (var type in types.Where(type => GetAttribute(type, ModuleAttributeName) != null).OrderBy(GetLuaModuleName, StringComparer.Ordinal)) {
+                AppendModuleDefinition(builder, type);
+            }
+            return builder.ToString().Trim();
+        }
+
+        private static void AppendObjectDefinition(StringBuilder builder, INamedTypeSymbol type) {
+            AppendSectionSeparator(builder);
+            AppendDescription(builder, GetDocumentation(type).Summary);
+            var luaTypeName = GetLuaTypeName(type);
+            var variableName = $"__{SanitizeIdentifier(luaTypeName)}";
+            builder.Append("---@class ").AppendLine(luaTypeName);
+            builder.Append("local ").Append(variableName).AppendLine(" = {}");
+            foreach (var method in GetLuaMethods(type).Where(method => !method.IsStatic).OrderBy(GetLuaFunctionName, StringComparer.Ordinal)) {
+                AppendFunctionDefinition(builder, variableName, method, true);
+            }
+        }
+
+        private static void AppendModuleDefinition(StringBuilder builder, INamedTypeSymbol type) {
+            AppendSectionSeparator(builder);
+            AppendDescription(builder, GetDocumentation(type).Summary);
+            var luaTypeName = GetLuaTypeName(type);
+            var moduleReference = GetGlobalReference(GetLuaModuleName(type));
+            builder.Append("---@class ").Append(luaTypeName).AppendLine("Module");
+            builder.Append("---@type ").Append(luaTypeName).AppendLine("Module");
+            builder.Append(moduleReference).Append(" = ").Append(moduleReference).AppendLine(" or {}");
+            foreach (var method in GetLuaMethods(type).OrderBy(GetLuaFunctionName, StringComparer.Ordinal)) {
+                AppendFunctionDefinition(builder, moduleReference, method, false);
+            }
+        }
+
+        private static void AppendFunctionDefinition(StringBuilder builder, string ownerName, IMethodSymbol method, bool objectMethod) {
+            var documentation = GetDocumentation(method);
+            AppendDescription(builder, documentation.Summary);
+            foreach (var parameter in method.Parameters) {
+                builder.Append("---@param ").Append(SanitizeIdentifier(parameter.Name)).Append(' ').Append(GetLuaType(parameter.Type));
+                if (documentation.Parameters.TryGetValue(parameter.Name, out var description) && !string.IsNullOrEmpty(description)) {
+                    builder.Append(' ').Append(description);
+                }
+                builder.AppendLine();
+            }
+
+            var returnType = GetEffectiveReturnType(method.ReturnType);
+            if (returnType != null) {
+                builder.Append("---@return ").Append(GetLuaType(returnType));
+                if (!string.IsNullOrEmpty(documentation.Returns)) {
+                    builder.Append(' ').Append(documentation.Returns);
+                }
+                builder.AppendLine();
+            }
+
+            var functionName = GetLuaFunctionName(method);
+            var parameters = string.Join(", ", method.Parameters.Select(parameter => SanitizeIdentifier(parameter.Name)));
+            if (IsLuaIdentifier(functionName)) {
+                builder.Append("function ").Append(ownerName).Append(objectMethod ? ':' : '.').Append(functionName)
+                    .Append('(').Append(parameters).AppendLine(") end");
+            }
+            else {
+                builder.Append(ownerName).Append('[').Append(ToLuaString(functionName)).Append("] = function(")
+                    .Append(parameters).AppendLine(") end");
+            }
+        }
+
+        private static string GenerateMetadataProvider(string definition) {
+            var builder = new StringBuilder();
+            builder.AppendLine("// <auto-generated/>");
+            builder.AppendLine("#if UNITY_EDITOR");
+            builder.AppendLine("#nullable disable");
+            builder.AppendLine("internal sealed class __UnityLuaSystemGeneratedApiMetadata : global::UnityLuaSystem.ILuaGeneratedApiMetadata {");
+            builder.AppendLine("    public __UnityLuaSystemGeneratedApiMetadata() {");
+            builder.AppendLine("    }");
+            builder.AppendLine();
+            builder.Append("    public string Definition => \"").Append(EscapeCSharp(definition)).AppendLine("\";");
+            builder.AppendLine("}");
+            builder.AppendLine("#endif");
+            return builder.ToString();
+        }
+
+        private static IEnumerable<IMethodSymbol> GetLuaMethods(INamedTypeSymbol type) {
+            return type.GetMembers()
+                .OfType<IMethodSymbol>()
+                .Where(method => method.MethodKind == MethodKind.Ordinary)
+                .Where(method => method.DeclaredAccessibility == Accessibility.Public)
+                .Where(method => GetAttribute(method, FunctionAttributeName) != null);
+        }
+
         private static bool IsSupportedMethod(IMethodSymbol method) {
             if (method.Parameters.Any(parameter => parameter.RefKind != RefKind.None || !IsSupportedType(parameter.Type))) {
                 return false;
@@ -171,9 +264,6 @@ namespace UnityLuaSystem.SourceGenerator {
             return method.ReturnsVoid || IsSupportedType(method.ReturnType);
         }
 
-        /// <summary>
-        /// Luaとの同期変換に対応する型かどうかを確認
-        /// </summary>
         private static bool IsSupportedType(ITypeSymbol type) {
             if (type is IArrayTypeSymbol arrayType) {
                 return arrayType.Rank == 1 && IsSupportedType(arrayType.ElementType);
@@ -190,9 +280,62 @@ namespace UnityLuaSystem.SourceGenerator {
             return type is INamedTypeSymbol namedType && GetAttribute(namedType, ObjectAttributeName) != null;
         }
 
-        /// <summary>
-        /// Luaへ公開する関数名を取得
-        /// </summary>
+        private static ITypeSymbol GetEffectiveReturnType(ITypeSymbol type) {
+            if (type.SpecialType == SpecialType.System_Void || type.ToDisplayString() == "System.Threading.Tasks.Task" || type.ToDisplayString() == "System.Collections.IEnumerator") {
+                return null;
+            }
+            if (type is INamedTypeSymbol namedType && namedType.IsGenericType
+                && namedType.ConstructedFrom.ToDisplayString() == "System.Threading.Tasks.Task<TResult>") {
+                return namedType.TypeArguments[0];
+            }
+            if (type is INamedTypeSymbol awaitableType) {
+                var awaiterMethod = awaitableType.GetMembers("GetAwaiter").OfType<IMethodSymbol>().FirstOrDefault(method => method.Parameters.Length == 0);
+                if (awaiterMethod?.ReturnType is INamedTypeSymbol awaiterType) {
+                    var isCompleted = awaiterType.GetMembers("IsCompleted").OfType<IPropertySymbol>().FirstOrDefault();
+                    var getResult = awaiterType.GetMembers("GetResult").OfType<IMethodSymbol>().FirstOrDefault(method => method.Parameters.Length == 0);
+                    if (isCompleted?.Type.SpecialType == SpecialType.System_Boolean && getResult != null) {
+                        return getResult.ReturnsVoid ? null : getResult.ReturnType;
+                    }
+                }
+            }
+            return type;
+        }
+
+        private static string GetLuaType(ITypeSymbol type) {
+            if (type is IArrayTypeSymbol arrayType && arrayType.Rank == 1) {
+                return $"{GetLuaType(arrayType.ElementType)}[]";
+            }
+            switch (type.SpecialType) {
+                case SpecialType.System_Boolean:
+                    return "boolean";
+                case SpecialType.System_Byte:
+                case SpecialType.System_SByte:
+                case SpecialType.System_Int16:
+                case SpecialType.System_UInt16:
+                case SpecialType.System_Int32:
+                case SpecialType.System_UInt32:
+                case SpecialType.System_Int64:
+                case SpecialType.System_UInt64:
+                    return "integer";
+                case SpecialType.System_Single:
+                case SpecialType.System_Double:
+                case SpecialType.System_Decimal:
+                    return "number";
+                case SpecialType.System_String:
+                case SpecialType.System_Char:
+                    return "string";
+            }
+            return type is INamedTypeSymbol namedType && GetAttribute(namedType, ObjectAttributeName) != null ? GetLuaTypeName(namedType) : "any";
+        }
+
+        private static string GetLuaModuleName(INamedTypeSymbol type) {
+            var attribute = GetAttribute(type, ModuleAttributeName);
+            if (attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is string name && !string.IsNullOrEmpty(name)) {
+                return name;
+            }
+            return type.Name;
+        }
+
         private static string GetLuaFunctionName(IMethodSymbol method) {
             var attribute = GetAttribute(method, FunctionAttributeName);
             if (attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is string name && !string.IsNullOrEmpty(name)) {
@@ -201,28 +344,149 @@ namespace UnityLuaSystem.SourceGenerator {
             return method.Name;
         }
 
-        /// <summary>
-        /// 指定した完全名のAttributeを取得
-        /// </summary>
+        private static string GetLuaTypeName(INamedTypeSymbol type) {
+            return SanitizeIdentifier(type.ToDisplayString());
+        }
+
+        private static Documentation GetDocumentation(ISymbol symbol) {
+            var result = new Documentation();
+            var xml = symbol.GetDocumentationCommentXml();
+            if (string.IsNullOrWhiteSpace(xml)) {
+                xml = GetDocumentationCommentXmlFromSyntax(symbol);
+            }
+            if (string.IsNullOrWhiteSpace(xml)) {
+                return result;
+            }
+            try {
+                var root = XElement.Parse(xml);
+                result.Summary = NormalizeDocumentation(root.Element("summary"));
+                result.Returns = NormalizeDocumentation(root.Element("returns"));
+                foreach (var parameter in root.Elements("param")) {
+                    var name = parameter.Attribute("name")?.Value;
+                    if (!string.IsNullOrEmpty(name)) {
+                        result.Parameters[name] = NormalizeDocumentation(parameter);
+                    }
+                }
+            }
+            catch {
+                return result;
+            }
+            return result;
+        }
+
+        private static string GetDocumentationCommentXmlFromSyntax(ISymbol symbol) {
+            foreach (var syntaxReference in symbol.DeclaringSyntaxReferences) {
+                var leadingTrivia = syntaxReference.GetSyntax().GetLeadingTrivia().ToFullString();
+                var content = new StringBuilder();
+                foreach (var line in leadingTrivia.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)) {
+                    var trimmed = line.TrimStart();
+                    if (trimmed.StartsWith("///", StringComparison.Ordinal)) {
+                        content.AppendLine(trimmed.Substring(3));
+                    }
+                }
+                if (content.Length > 0) {
+                    return $"<member>{content}</member>";
+                }
+            }
+            return null;
+        }
+
+        private static string NormalizeDocumentation(XElement element) {
+            if (element == null) {
+                return null;
+            }
+            var builder = new StringBuilder();
+            AppendDocumentationNodes(builder, element.Nodes());
+            return string.Join(" ", builder.ToString().Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        private static void AppendDocumentationNodes(StringBuilder builder, IEnumerable<XNode> nodes) {
+            foreach (var node in nodes) {
+                if (node is XText text) {
+                    builder.Append(text.Value);
+                }
+                else if (node is XElement element) {
+                    if (element.Name.LocalName == "see") {
+                        var reference = element.Attribute("cref")?.Value;
+                        builder.Append(FormatDocumentationReference(reference));
+                    }
+                    else if (element.Name.LocalName == "paramref") {
+                        builder.Append(element.Attribute("name")?.Value);
+                    }
+                    else {
+                        AppendDocumentationNodes(builder, element.Nodes());
+                    }
+                    builder.Append(' ');
+                }
+            }
+        }
+
+        private static string FormatDocumentationReference(string reference) {
+            if (string.IsNullOrEmpty(reference)) {
+                return string.Empty;
+            }
+            var colonIndex = reference.IndexOf(':');
+            return colonIndex >= 0 ? reference.Substring(colonIndex + 1) : reference;
+        }
+
+        private static void AppendDescription(StringBuilder builder, string description) {
+            if (!string.IsNullOrEmpty(description)) {
+                builder.Append("---").AppendLine(description);
+            }
+        }
+
+        private static void AppendSectionSeparator(StringBuilder builder) {
+            if (builder.Length > 0) {
+                builder.AppendLine();
+            }
+        }
+
+        private static string GetGlobalReference(string name) {
+            return IsLuaIdentifier(name) ? name : $"_G[{ToLuaString(name)}]";
+        }
+
+        private static bool IsLuaIdentifier(string value) {
+            if (string.IsNullOrEmpty(value) || LuaKeywords.Contains(value) || (!char.IsLetter(value[0]) && value[0] != '_')) {
+                return false;
+            }
+            return value.Skip(1).All(character => char.IsLetterOrDigit(character) || character == '_');
+        }
+
+        private static string SanitizeIdentifier(string value) {
+            if (string.IsNullOrEmpty(value)) {
+                return "value";
+            }
+            var builder = new StringBuilder(value.Length);
+            foreach (var character in value) {
+                builder.Append(char.IsLetterOrDigit(character) || character == '_' ? character : '_');
+            }
+            if (char.IsDigit(builder[0]) || LuaKeywords.Contains(builder.ToString())) {
+                builder.Insert(0, '_');
+            }
+            return builder.ToString();
+        }
+
+        private static string ToLuaString(string value) {
+            return $"\"{EscapeCSharp(value)}\"";
+        }
+
         private static AttributeData GetAttribute(ISymbol symbol, string attributeName) {
             return symbol.GetAttributes().FirstOrDefault(attribute => attribute.AttributeClass?.ToDisplayString() == attributeName);
         }
 
-        /// <summary>
-        /// 生成する文字列リテラルをエスケープ
-        /// </summary>
-        private static string Escape(string value) {
-            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        private static string EscapeCSharp(string value) {
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
         }
 
-        /// <summary>
-        /// Attributeを持つ可能性があるクラス宣言を収集
-        /// </summary>
-        private sealed class ModuleSyntaxReceiver : ISyntaxReceiver {
-            /// <summary>Attributeを持つクラス宣言</summary>
+        private sealed class Documentation {
+            internal Dictionary<string, string> Parameters { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+            internal string Summary { get; set; }
+            internal string Returns { get; set; }
+        }
+
+        private sealed class AttributedTypeSyntaxReceiver : ISyntaxReceiver {
             internal List<ClassDeclarationSyntax> Candidates { get; } = new List<ClassDeclarationSyntax>();
 
-            /// <inheritdoc/>
             public void OnVisitSyntaxNode(SyntaxNode syntaxNode) {
                 if (syntaxNode is ClassDeclarationSyntax declaration && declaration.AttributeLists.Count > 0) {
                     Candidates.Add(declaration);

@@ -1,0 +1,10 @@
+{
+    "name": "UnityLuaSystem.Editor",
+    "rootNamespace": "UnityLuaSystem.Editor",
+    "references": [
+        "UnityLuaSystem.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ]
+}

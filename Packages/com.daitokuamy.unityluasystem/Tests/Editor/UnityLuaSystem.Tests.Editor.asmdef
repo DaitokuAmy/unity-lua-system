@@ -2,7 +2,8 @@
     "name": "UnityLuaSystem.Tests.Editor",
     "rootNamespace": "UnityLuaSystem.Tests",
     "references": [
-        "UnityLuaSystem.Runtime"
+        "UnityLuaSystem.Runtime",
+        "UnityLuaSystem.Editor"
     ],
     "includePlatforms": [
         "Editor"

@@ -347,6 +347,49 @@ PackageにはSource Generatorが同梱されています。利用者による生
 
 `Task`、`UniTask`、`IEnumerator` などの非同期関数は、現在はReflection経路で処理します。利用者側の呼び出し方は生成経路とReflection経路で変わりません。
 
+## VS CodeでLua APIを補完する
+
+VS CodeへLua Language Server対応のLua拡張機能を導入すると、C#から公開したモジュール、関数、引数および戻り値をLua側で補完できます。
+
+Source Generatorはコンパイル時に `[LuaModule]`、`[LuaObject]`、`[LuaFunction]` とXMLドキュメントコメントを収集し、Editor限定のAPIメタデータを生成します。Unity Editorで `Tools > Unity Lua System > Generate Lua Definitions` を実行すると、そのメタデータから次のLuaCATS定義ファイルを生成します。
+
+```text
+Library/UnityLuaSystem/LuaDefinitions/UnityLuaSystem.lua
+```
+
+プロジェクトの `.vscode/settings.json` へ生成先を追加します。
+
+```json
+{
+  "Lua.runtime.version": "Lua 5.4",
+  "Lua.workspace.library": [
+    "./Library/UnityLuaSystem/LuaDefinitions"
+  ]
+}
+```
+
+C#側の公開APIを変更した場合は、メニューを再度実行して定義を更新してください。生成先はUnityの `Library` 配下であるため、通常はバージョン管理へ追加する必要はありません。
+
+`summary`、`param`、`returns`の内容は、関数候補およびホバー表示の説明へ反映されます。
+
+```csharp
+/// <summary>指定量だけプレイヤーを回復</summary>
+/// <param name="amount">回復量</param>
+/// <returns>回復後の体力</returns>
+[LuaFunction("heal")]
+public int Heal(int amount) {
+    return amount;
+}
+```
+
+利用側のEditorコードやCIから生成する場合は、公開static APIを呼び出せます。引数へ任意の出力先を指定することもできます。
+
+```csharp
+using UnityLuaSystem.Editor;
+
+var outputPath = LuaDefinitionExporter.Generate();
+```
+
 ## 対応している値型
 
 現在、LuaとC#の間で直接変換できる基本型は次のとおりです。

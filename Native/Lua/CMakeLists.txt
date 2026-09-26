@@ -1,0 +1,63 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(UnityLua54 LANGUAGES C)
+
+set(LUA_SOURCE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lua-5.4.9/src")
+set(UNITY_PLUGIN_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/x86_64"
+    CACHE PATH
+    "Directory where the built Unity native plugin is installed"
+)
+set(LUA_BUILD_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugin")
+
+file(GLOB LUA_SOURCES CONFIGURE_DEPENDS "${LUA_SOURCE_DIRECTORY}/*.c")
+list(REMOVE_ITEM LUA_SOURCES
+    "${LUA_SOURCE_DIRECTORY}/lua.c"
+    "${LUA_SOURCE_DIRECTORY}/luac.c"
+)
+
+if(IOS)
+    set(LUA_LIBRARY_TYPE STATIC)
+elseif(APPLE)
+    set(LUA_LIBRARY_TYPE MODULE)
+else()
+    set(LUA_LIBRARY_TYPE SHARED)
+endif()
+
+add_library(lua54 ${LUA_LIBRARY_TYPE} ${LUA_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/unity_lua_bridge.c")
+
+target_include_directories(lua54 PUBLIC "${LUA_SOURCE_DIRECTORY}")
+set_target_properties(lua54 PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    OUTPUT_NAME "unitylua54"
+    ARCHIVE_OUTPUT_DIRECTORY "${LUA_BUILD_OUTPUT_DIRECTORY}"
+    LIBRARY_OUTPUT_DIRECTORY "${LUA_BUILD_OUTPUT_DIRECTORY}"
+    RUNTIME_OUTPUT_DIRECTORY "${LUA_BUILD_OUTPUT_DIRECTORY}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${LUA_BUILD_OUTPUT_DIRECTORY}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${LUA_BUILD_OUTPUT_DIRECTORY}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${LUA_BUILD_OUTPUT_DIRECTORY}"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${LUA_BUILD_OUTPUT_DIRECTORY}"
+)
+
+if(WIN32)
+    install(TARGETS lua54 RUNTIME DESTINATION "${UNITY_PLUGIN_DIRECTORY}")
+else()
+    install(TARGETS lua54
+        LIBRARY DESTINATION "${UNITY_PLUGIN_DIRECTORY}"
+        ARCHIVE DESTINATION "${UNITY_PLUGIN_DIRECTORY}"
+    )
+endif()
+
+if(APPLE AND NOT IOS)
+    set_target_properties(lua54 PROPERTIES
+        PREFIX ""
+        SUFFIX ".bundle"
+    )
+endif()
+
+if(MSVC)
+    target_compile_definitions(lua54 PRIVATE LUA_BUILD_AS_DLL)
+    target_compile_options(lua54 PRIVATE /W4)
+    set_target_properties(lua54 PROPERTIES PREFIX "")
+endif()

@@ -1,0 +1,134 @@
+name: Build Apple native plugins
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_pull_request:
+        description: Create a pull request containing the generated plugins
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: apple-native-plugins-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build macOS and iOS plugins
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Require a branch workflow run
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [[ "$REF_TYPE" != "branch" ]]; then
+            echo "Run this workflow from a branch so the generated plugins can be reviewed before tagging."
+            exit 1
+          fi
+
+      - name: Build macOS Universal plugin
+        run: |
+          cmake \
+            -S Native/Lua \
+            -B Native/Lua/build/macos-universal \
+            -G Xcode \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DUNITY_PLUGIN_DIRECTORY="$GITHUB_WORKSPACE/Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS"
+          cmake \
+            --build Native/Lua/build/macos-universal \
+            --config Release
+          cmake \
+            --install Native/Lua/build/macos-universal \
+            --config Release
+
+      - name: Build iOS arm64 plugin
+        run: |
+          cmake \
+            -S Native/Lua \
+            -B Native/Lua/build/ios-arm64 \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DUNITY_PLUGIN_DIRECTORY="$GITHUB_WORKSPACE/Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS"
+          cmake \
+            --build Native/Lua/build/ios-arm64 \
+            --config Release
+          cmake \
+            --install Native/Lua/build/ios-arm64 \
+            --config Release
+
+      - name: Install Unity plugin metadata
+        run: |
+          cp \
+            Native/Lua/PluginMetadata/unitylua54.bundle.meta.template \
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS/unitylua54.bundle.meta
+          cp \
+            Native/Lua/PluginMetadata/libunitylua54.a.meta.template \
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS/libunitylua54.a.meta
+
+      - name: Verify Apple plugins
+        run: |
+          mac_plugin="Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS/unitylua54.bundle"
+          ios_plugin="Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS/libunitylua54.a"
+
+          test "$(lipo -archs "$mac_plugin")" = "x86_64 arm64" || \
+            test "$(lipo -archs "$mac_plugin")" = "arm64 x86_64"
+          test "$(lipo -archs "$ios_plugin")" = "arm64"
+          nm -gU "$mac_plugin" | grep -q '_luaL_newstate'
+          nm -gU "$mac_plugin" | grep -q '_unity_lua_push_managed_callback'
+          nm -gU "$ios_plugin" | grep -q '_luaL_newstate'
+          nm -gU "$ios_plugin" | grep -q '_unity_lua_push_managed_callback'
+
+      - name: Upload Apple plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-native-plugins-${{ github.sha }}
+          path: |
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS/unitylua54.bundle
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS/unitylua54.bundle.meta
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS/libunitylua54.a
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS/libunitylua54.a.meta
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create generated plugin pull request
+        if: ${{ inputs.create_pull_request }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.ref_name }}
+          BUILD_BRANCH: automation/apple-native-plugins-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BUILD_BRANCH"
+          git add \
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS/unitylua54.bundle \
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/macOS/unitylua54.bundle.meta \
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS/libunitylua54.a \
+            Packages/com.daitokuamy.unityluasystem/Runtime/Plugins/iOS/libunitylua54.a.meta
+
+          if git diff --cached --quiet; then
+            echo "The committed Apple plugins are already current."
+            exit 0
+          fi
+
+          git commit -m "[build] Appleネイティブプラグインを更新"
+          git push origin "HEAD:refs/heads/$BUILD_BRANCH"
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$BUILD_BRANCH" \
+            --title "[build] Appleネイティブプラグインを更新" \
+            --body "macOS Universal（arm64/x86_64）およびiOS実機用arm64プラグインを更新します。Actions run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

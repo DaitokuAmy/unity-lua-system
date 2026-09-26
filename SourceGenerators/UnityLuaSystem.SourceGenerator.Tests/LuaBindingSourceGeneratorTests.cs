@@ -63,6 +63,8 @@ namespace Sample {
         /// <returns>取得したメッセージ</returns>
         [UnityLuaSystem.LuaFunction(""load_async"")]
         public System.Threading.Tasks.Task<string> LoadAsync() => null;
+        [UnityLuaSystem.LuaFunction(""unsupported"")]
+        public System.DateTime Unsupported(System.DateTime value) => value;
     }
 }";
 
@@ -127,6 +129,7 @@ namespace Sample {
             Assert.That(generatedSource, Does.Contain("function __Sample_Player:heal(amount) end"));
             Assert.That(generatedSource, Does.Contain("---@return string 取得したメッセージ"));
             Assert.That(generatedSource, Does.Contain("function calculator.load_async() end"));
+            Assert.That(generatedSource, Does.Not.Contain("calculator.unsupported"));
             Assert.That(generatedSource, Does.Contain("ILuaGeneratedApiMetadata"));
         }
     }

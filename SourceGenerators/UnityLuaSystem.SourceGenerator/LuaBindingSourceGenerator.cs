@@ -184,7 +184,7 @@ namespace UnityLuaSystem.SourceGenerator {
             var variableName = $"__{SanitizeIdentifier(luaTypeName)}";
             builder.Append("---@class ").AppendLine(luaTypeName);
             builder.Append("local ").Append(variableName).AppendLine(" = {}");
-            foreach (var method in GetLuaMethods(type).Where(method => !method.IsStatic).OrderBy(GetLuaFunctionName, StringComparer.Ordinal)) {
+            foreach (var method in GetLuaMethods(type).Where(method => !method.IsStatic && IsSupportedApiMethod(method)).OrderBy(GetLuaFunctionName, StringComparer.Ordinal)) {
                 AppendFunctionDefinition(builder, variableName, method, true);
             }
         }
@@ -197,7 +197,7 @@ namespace UnityLuaSystem.SourceGenerator {
             builder.Append("---@class ").Append(luaTypeName).AppendLine("Module");
             builder.Append("---@type ").Append(luaTypeName).AppendLine("Module");
             builder.Append(moduleReference).Append(" = ").Append(moduleReference).AppendLine(" or {}");
-            foreach (var method in GetLuaMethods(type).OrderBy(GetLuaFunctionName, StringComparer.Ordinal)) {
+            foreach (var method in GetLuaMethods(type).Where(IsSupportedApiMethod).OrderBy(GetLuaFunctionName, StringComparer.Ordinal)) {
                 AppendFunctionDefinition(builder, moduleReference, method, false);
             }
         }
@@ -262,6 +262,18 @@ namespace UnityLuaSystem.SourceGenerator {
                 return false;
             }
             return method.ReturnsVoid || IsSupportedType(method.ReturnType);
+        }
+
+        private static bool IsSupportedApiMethod(IMethodSymbol method) {
+            if (method.IsGenericMethod || method.ReturnsByRef || method.ReturnsByRefReadonly) {
+                return false;
+            }
+            if (method.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsOptional || !IsSupportedType(parameter.Type))) {
+                return false;
+            }
+
+            var returnType = GetEffectiveReturnType(method.ReturnType);
+            return returnType == null || IsSupportedType(returnType);
         }
 
         private static bool IsSupportedType(ITypeSymbol type) {

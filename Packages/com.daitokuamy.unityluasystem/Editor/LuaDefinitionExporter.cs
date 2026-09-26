@@ -9,7 +9,7 @@ namespace UnityLuaSystem.Editor {
     /// </summary>
     public static class LuaDefinitionExporter {
         /// <summary>既定の定義ファイル出力先</summary>
-        public const string DefaultOutputPath = "Library/UnityLuaSystem/LuaDefinitions/UnityLuaSystem.lua";
+        public const string DefaultOutputPath = ".vscode/LuaDefinitions/UnityLuaSystem.lua";
 
         /// <summary>
         /// プロジェクト内のLua公開APIを既定の出力先へ保存
@@ -31,6 +31,7 @@ namespace UnityLuaSystem.Editor {
 
             var metadata = TypeCache.GetTypesDerivedFrom<ILuaGeneratedApiMetadata>()
                 .Where(type => !type.IsAbstract && !type.IsInterface)
+                .Where(type => !type.Assembly.GetReferencedAssemblies().Any(reference => reference.Name == "nunit.framework"))
                 .Select(type => (ILuaGeneratedApiMetadata)System.Activator.CreateInstance(type));
             var definition = LuaDefinitionGenerator.Generate(metadata);
             var absolutePath = Path.GetFullPath(outputPath);

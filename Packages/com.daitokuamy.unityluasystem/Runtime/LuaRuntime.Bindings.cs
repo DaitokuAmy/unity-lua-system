@@ -117,6 +117,7 @@ namespace UnityLuaSystem {
             var moduleName = string.IsNullOrEmpty(moduleAttribute.Name) ? moduleType.Name : moduleAttribute.Name;
             var methodFlags = BindingFlags.Public | (staticOnly ? BindingFlags.Static : BindingFlags.Instance);
             var methods = moduleType.GetMethods(methodFlags);
+            ValidateLuaFunctionNames(moduleType, methods, "module");
             var bindings = new List<BindingContext>();
             var generatedBinding = CreateGeneratedModuleBinding(moduleType, instance);
 
@@ -128,7 +129,6 @@ namespace UnityLuaSystem {
                     continue;
                 }
 
-                ValidateMethod(method);
                 var functionName = string.IsNullOrEmpty(functionAttribute.Name) ? method.Name : functionAttribute.Name;
                 BindingContext binding;
                 if (generatedBinding != null && generatedBinding.TryGetFunction(method.Name, out var generatedName, out var callback)) {
@@ -451,17 +451,18 @@ namespace UnityLuaSystem {
             }
 
             var metatableName = $"UnityLuaSystem.{objectType.AssemblyQualifiedName}";
+            var methods = objectType.GetMethods(BindingFlags.Public | BindingFlags.Instance);
+            ValidateLuaFunctionNames(objectType, methods, "Lua object");
             LuaNative.NewMetatable(_state, ToNullTerminatedUtf8(metatableName));
             LuaNative.PushValue(_state, -1);
             LuaNative.SetField(_state, -2, ToNullTerminatedUtf8("__index"));
 
-            foreach (var method in objectType.GetMethods(BindingFlags.Public | BindingFlags.Instance)) {
+            foreach (var method in methods) {
                 var functionAttribute = method.GetCustomAttribute<LuaFunctionAttribute>();
                 if (functionAttribute == null) {
                     continue;
                 }
 
-                ValidateMethod(method);
                 var functionName = string.IsNullOrEmpty(functionAttribute.Name) ? method.Name : functionAttribute.Name;
                 var binding = CreateBinding(method, null, true);
                 PushBinding(binding);
@@ -484,6 +485,28 @@ namespace UnityLuaSystem {
             foreach (var parameter in method.GetParameters()) {
                 if (parameter.ParameterType.IsByRef || parameter.IsOut || parameter.IsOptional) {
                     throw new NotSupportedException($"The method '{method.DeclaringType?.FullName}.{method.Name}' has an unsupported parameter.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Luaへ公開する関数名の重複とシグネチャを検証
+        /// </summary>
+        /// <param name="type">検証対象の型</param>
+        /// <param name="methods">検証対象のメソッド</param>
+        /// <param name="typeDescription">例外メッセージへ使用する型の説明</param>
+        private static void ValidateLuaFunctionNames(Type type, IEnumerable<MethodInfo> methods, string typeDescription) {
+            var functionNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var method in methods) {
+                var functionAttribute = method.GetCustomAttribute<LuaFunctionAttribute>();
+                if (functionAttribute == null) {
+                    continue;
+                }
+
+                ValidateMethod(method);
+                var functionName = string.IsNullOrEmpty(functionAttribute.Name) ? method.Name : functionAttribute.Name;
+                if (!functionNames.Add(functionName)) {
+                    throw new InvalidOperationException($"The {typeDescription} type '{type.FullName}' contains multiple Lua functions named '{functionName}'.");
                 }
             }
         }

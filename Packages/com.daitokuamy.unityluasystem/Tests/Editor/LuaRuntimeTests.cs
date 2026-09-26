@@ -74,6 +74,26 @@ namespace UnityLuaSystem.Tests {
     }
 
     /// <summary>
+    /// Lua関数名の重複検証に使用するモジュール
+    /// </summary>
+    [LuaModule("duplicate")]
+    public sealed class DuplicateFunctionModule {
+        /// <summary>最初の値を返却</summary>
+        /// <returns>最初の値</returns>
+        [LuaFunction("value")]
+        public int GetFirstValue() {
+            return 1;
+        }
+
+        /// <summary>2番目の値を返却</summary>
+        /// <returns>2番目の値</returns>
+        [LuaFunction("value")]
+        public int GetSecondValue() {
+            return 2;
+        }
+    }
+
+    /// <summary>
     /// LuaRuntimeの動作を確認するテスト
     /// </summary>
     public sealed class LuaRuntimeTests {
@@ -88,6 +108,18 @@ namespace UnityLuaSystem.Tests {
                 "binding-test");
 
             Assert.That(result, Is.EqualTo(110));
+        }
+
+        /// <summary>
+        /// 同じLua関数名を持つモジュールを登録できないことを確認
+        /// </summary>
+        [Test]
+        public void RegisterModule_WithDuplicateLuaFunctionNames_ThrowsInvalidOperationException() {
+            using var runtime = new LuaRuntime();
+
+            var exception = Assert.Throws<InvalidOperationException>(() => runtime.RegisterModule(new DuplicateFunctionModule()));
+
+            Assert.That(exception.Message, Does.Contain("multiple Lua functions named 'value'"));
         }
 
         /// <summary>

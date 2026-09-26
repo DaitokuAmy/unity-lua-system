@@ -27,8 +27,10 @@ Unity固有のGameObjectやComponentをLuaへ公開する機能は持たず、�
 | --- | --- |
 | Windows Editor / Standalone | x86_64 |
 | Android | ARM64 |
+| macOS Editor / Standalone | Universal |
+| iOS | ARM64 |
 
-macOS、iOSおよびその他のプラットフォーム用Native Pluginは未収録です。
+その他のプラットフォーム用Native Pluginは未収録です。
 
 ## インストール
 
@@ -354,7 +356,7 @@ VS CodeへLua Language Server対応のLua拡張機能を導入すると、C#か�
 Source Generatorはコンパイル時に `[LuaModule]`、`[LuaObject]`、`[LuaFunction]` とXMLドキュメントコメントを収集し、Editor限定のAPIメタデータを生成します。Unity Editorで `Tools > Unity Lua System > Generate Lua Definitions` を実行すると、そのメタデータから次のLuaCATS定義ファイルを生成します。
 
 ```text
-Library/UnityLuaSystem/LuaDefinitions/UnityLuaSystem.lua
+.vscode/LuaDefinitions/UnityLuaSystem.lua
 ```
 
 プロジェクトの `.vscode/settings.json` へ生成先を追加します。
@@ -363,12 +365,12 @@ Library/UnityLuaSystem/LuaDefinitions/UnityLuaSystem.lua
 {
   "Lua.runtime.version": "Lua 5.4",
   "Lua.workspace.library": [
-    "./Library/UnityLuaSystem/LuaDefinitions"
+    "./.vscode/LuaDefinitions"
   ]
 }
 ```
 
-C#側の公開APIを変更した場合は、メニューを再度実行して定義を更新してください。生成先はUnityの `Library` 配下であるため、通常はバージョン管理へ追加する必要はありません。
+C#側の公開APIを変更した場合は、メニューを再度実行して定義を更新してください。生成した定義は `.vscode` 配下へ保存されるため、プロジェクトメンバーと共有する場合はバージョン管理へ追加してください。
 
 `summary`、`param`、`returns`の内容は、関数候補およびホバー表示の説明へ反映されます。
 
